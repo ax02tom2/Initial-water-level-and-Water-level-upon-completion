@@ -6,8 +6,8 @@ import json
 import uuid
 import streamlit.components.v1 as components
 
-st.set_page_config(page_title="上下工水位自動繪圖系統", layout="wide")
-st.title("💧 上下工水位自動繪圖系統")
+st.set_page_config(page_title="鑽探上下工水位自動繪圖系統", layout="wide")
+st.title("💧 鑽探上下工水位自動繪圖系統")
 
 # ==========================================
 # 版面參數（想微調位置，改這裡即可）
@@ -138,7 +138,7 @@ def fit_layer_text(label, seg_h_px, strip_px):
 # 3. CAD 成果圖（主圖，不含圖例）
 # ==========================================
 st.write("---")
-st.subheader("📊 最終上下工水位成果圖")
+st.subheader("📊 最終鑽探上下工水位成果圖")
 
 if not valid_df.empty:
     fig = go.Figure()
