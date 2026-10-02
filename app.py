@@ -28,7 +28,7 @@ page_bg_img = '''
     left: 0;
     width: 100%;
     height: 100%;
-    background-color: rgba(255, 255, 255, 0.65); /* 65% 刷白 */
+    background-color: rgba(255, 255, 255, 0.5); /* 50% 刷白 */
     backdrop-filter: blur(12px);                 /* 毛玻璃效果 */
     pointer-events: none;                        /* 穿透點擊，避免按鈕失效 */
     z-index: 0;                                  /* 定位在底層 */
