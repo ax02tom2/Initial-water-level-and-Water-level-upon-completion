@@ -13,14 +13,12 @@ st.set_page_config(page_title="鑽探上下工水位自動繪圖系統", layout=
 # ==========================================
 page_bg_img = '''
 <style>
-/* 1. 將背景圖綁定在 Streamlit 最外層主容器 */
 [data-testid="stAppViewContainer"] {
     background-image: url("https://images.unsplash.com/photo-1504307651254-35680f356dfd?q=80&w=2070&auto=format&fit=crop");
     background-size: cover;
     background-position: center;
     background-attachment: fixed;
 }
-/* 2. 利用 ::before 疊加一層 65% 白色遮罩與毛邊模糊 */
 [data-testid="stAppViewContainer"]::before {
     content: "";
     position: absolute;
@@ -28,16 +26,14 @@ page_bg_img = '''
     left: 0;
     width: 100%;
     height: 100%;
-    background-color: rgba(255, 255, 255, 0.5); /* 50% 刷白 */
-    backdrop-filter: blur(12px);                 /* 毛玻璃效果 */
-    pointer-events: none;                        /* 穿透點擊，避免按鈕失效 */
-    z-index: 0;                                  /* 定位在底層 */
+    background-color: rgba(255, 255, 255, 0.65); 
+    backdrop-filter: blur(12px);                 
+    pointer-events: none;                        
+    z-index: 0;                                  
 }
-/* 3. 隱藏預設的頂部白條 */
 [data-testid="stHeader"] {
     background-color: transparent !important;
 }
-/* 4. 將主要內容區塊拉上來，並加上一層微透明質感面板，確保資料易讀 */
 .block-container {
     position: relative;
     z-index: 1;
@@ -52,6 +48,25 @@ page_bg_img = '''
 st.markdown(page_bg_img, unsafe_allow_html=True)
 
 st.title("💧 鑽探上下工水位自動繪圖系統")
+
+# ==========================================
+# ⚙️ [可自訂參數區]：文獻參考資料 (摺疊面板)
+# ==========================================
+# 調整說明：使用 st.expander 建立預設折疊的區塊。
+# 若想更改顯示的文字，直接修改 st.markdown 內的字串即可。
+# 若圖片檔名有變，請修改 st.image 裡面的 "image_2c1a61.jpg"。
+with st.expander("📖 點此查看：文獻資料與漏水層判定定義"):
+    st.markdown("""
+    為瞭解調查區或可能含水層及受壓水層之分布情形，各鑽探孔在施鑽岩芯取樣後外套管同時鑽入保護孔壁，
+    施鑽過程均每日記錄施鑽進度，與當日上工及翌日下工鑽孔內水位，除瞭解地下水分布，若水位有較大明顯昇降，
+    亦可能研判可能有漏水層或受壓水層之存在，可提供後續地下水特性綜合分析研判，關於有水層及漏水層之定義，如圖所示：
+    """)
+    try:
+        # 載入同資料夾內的文獻圖片
+        st.image("image_2c1a61.jpg", caption="孔內地下水位變化示意圖及說明", use_container_width=True)
+    except Exception:
+        st.warning("⚠️ 找不到圖片檔案。請確認 'image_2c1a61.jpg' 是否與 app.py 放在同一個資料夾。")
+
 
 # ==========================================
 # 版面參數（想微調位置，改這裡即可）
@@ -113,8 +128,8 @@ uploaded_file = st.file_uploader("📂 匯入 Excel 檔案 (選填)", type=["xls
 # ==========================================
 # ⚙️ [可自訂參數區]：網頁初始化的預設表格內容
 # ==========================================
-# 調整說明：這裡將原本的預設數字替換為 np.nan (空數值) 與 "" (空字串)
-# [np.nan] * 5 代表產生 5 個空列，您可以把 5 改成 10，網頁一開始就會給 10 行空格
+# 調整說明：這裡使用 np.nan (空數值) 與 "" (空字串) 產生乾淨的表格
+# 預設 [np.nan] * 5 代表產生 5 個空列，想增加預設行數可將 5 改為其他數字
 default_data = pd.DataFrame({
     "工作天數": [np.nan] * 5,
     "日期": [""] * 5,
