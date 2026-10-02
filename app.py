@@ -68,7 +68,7 @@ with st.expander("📖 點此查看：文獻資料與漏水層判定定義"):
 
 
 # ==========================================
-# ⚙️️ [可自訂參數區]：版面與圖表微調參數
+# ⚙ [可自訂參數區]：版面與圖表微調參數
 # ==========================================
 RULER_X = -0.4      # 深度尺所在 x 位置
 STRIP_X1 = 0.2      # 漏水層色帶右邊界（色帶寬 = STRIP_X1 - RULER_X）
@@ -84,11 +84,6 @@ LAYER_COLORS = {
     "部分漏水層": "#e8f5e9",
     "漏水層": "#fff3e0",
 }
-
-# --- 新增：主圖內鑲嵌圖例的位置參數 ---
-# 調整說明：若主圖的鑽探線條剛好擋到圖例，可在此修改位置
-LEG_X_OFFSET = 0.0  # 圖例左右平移 (正值往右移，負值往左移)
-LEG_Y = 0.5         # 圖例上下平移 (代表深度 m，數值越大越往下)
 
 
 def render_chart_with_download(fig, filename, btn_label, scale=2):
@@ -240,37 +235,7 @@ if not valid_df.empty:
     fig.add_annotation(x=lcx, y=-2.75, text="<b>鑽探進尺</b>", showarrow=False, font=dict(size=24))
 
     # --------------------------------------------------
-    # (C) 鑲嵌於主圖內的圖例 (回歸！)
-    # --------------------------------------------------
-    # 圖例動態錨定在最後一天的左上方，並受上方自訂參數控制
-    leg_x0 = X0 + max_days - 2.0 + LEG_X_OFFSET
-    leg_y0 = LEG_Y
-    
-    # 畫白底黑框確保不被鑽探線條干擾
-    fig.add_shape(type="rect", x0=leg_x0, y0=leg_y0, x1=leg_x0+1.9, y1=leg_y0+5.0, fillcolor="white", line=dict(color="black", width=2), layer="above")
-    fig.add_annotation(x=leg_x0+0.1, y=leg_y0+0.6, text="<b>(單位：m)</b>", showarrow=False, xanchor="left", font=dict(size=18))
-    fig.add_annotation(x=leg_x0+0.1, y=leg_y0+1.4, text="<b>圖例</b>", showarrow=False, xanchor="left", font=dict(size=22))
-
-    # 下工圖例 (▽)
-    fig.add_trace(go.Scatter(x=[leg_x0+0.3], y=[leg_y0+2.5], mode="markers", marker=dict(symbol="triangle-down-open", size=22, color="black", line=dict(width=2.5)), hoverinfo="skip"))
-    fig.add_shape(type="line", x0=leg_x0+0.3, y0=leg_y0+2.5, x1=leg_x0+0.3, y1=leg_y0+4.0, line=dict(dash="dash", color="black", width=1.5), layer="above")
-    fig.add_shape(type="line", x0=leg_x0+0.3, y0=leg_y0+2.5, x1=leg_x0+0.6, y1=leg_y0+2.5, line=dict(color="black", width=1.5), layer="above")
-    fig.add_annotation(x=leg_x0+0.7, y=leg_y0+2.5, text="<b>當日下工水位</b>", showarrow=False, xanchor="left", font=dict(size=20))
-
-    # 上工圖例 (▼)
-    fig.add_trace(go.Scatter(x=[leg_x0+0.3], y=[leg_y0+3.4], mode="markers", marker=dict(symbol="triangle-down", size=22, color="black"), hoverinfo="skip"))
-    fig.add_shape(type="line", x0=leg_x0+0.3, y0=leg_y0+3.4, x1=leg_x0+0.3, y1=leg_y0+4.0, line=dict(dash="dash", color="black", width=1.5), layer="above")
-    fig.add_shape(type="line", x0=leg_x0+0.3, y0=leg_y0+3.4, x1=leg_x0+0.6, y1=leg_y0+3.4, line=dict(color="black", width=1.5), layer="above")
-    fig.add_annotation(x=leg_x0+0.7, y=leg_y0+3.4, text="<b>翌日上工水位</b>", showarrow=False, xanchor="left", font=dict(size=20))
-
-    # 進尺底線圖例
-    fig.add_shape(type="line", x0=leg_x0+0.1, y0=leg_y0+4.2, x1=leg_x0+0.5, y1=leg_y0+4.2, line=dict(color="black", width=2), layer="above")
-    fig.add_shape(type="line", x0=leg_x0+0.5, y0=leg_y0+4.2, x1=leg_x0+0.6, y1=leg_y0+4.2, line=dict(dash="dash", color="black", width=1.5), layer="above")
-    fig.add_annotation(x=leg_x0+0.7, y=leg_y0+4.2, text="<b>當日鑽探進尺</b>", showarrow=False, xanchor="left", font=dict(size=20))
-
-
-    # --------------------------------------------------
-    # (D) 主體繪製：迴圈跑每一天的資料
+    # (C) 主體繪製：迴圈跑每一天的資料
     # --------------------------------------------------
     prev_depth = 0
 
@@ -362,7 +327,7 @@ else:
 # ==========================================
 with st.sidebar:
     st.header("🔖 獨立圖例下載區")
-    st.caption("若主圖空間太擠不想顯示圖例，您可以在此單獨下載圖例後，透過編輯軟體自行拼貼。")
+    st.caption("您可以直接在此查看圖例，或是單獨下載圖例後，透過編輯軟體自行拼貼到報告中。")
 
     LW, LH = 230, 190
     leg = go.Figure()
