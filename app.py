@@ -121,87 +121,115 @@ def render_chart_with_download(fig, filename, btn_label, scale=2):
 
 
 # ==========================================
-# 1. 資料輸入區 (擴充：手動漏水層判定選單)
+# 1. 資料輸入區 (系統狀態即時同步)
 # ==========================================
-st.write("您可以直接在下方表格輸入資料，或是上傳 Excel 檔案整批匯入。系統將自動進行漏水層判估，您也可以透過最右側欄位進行**人工強制微調**：")
+st.write("您可以直接在下方表格輸入資料，或是上傳 Excel 檔案整批匯入。系統會即時計算判定結果並顯示於表格後方；您也可以透過「手動漏水層判定」強制微調：")
 
 uploaded_file = st.file_uploader("📂 匯入 Excel 檔案 (選填)", type=["xlsx", "xls"])
 
-# 初始化預設表格
-default_data = pd.DataFrame({
-    "工作天數": [np.nan] * 5,
-    "日期": [""] * 5,
-    "鑽探起點(m)": [np.nan] * 5,
-    "鑽探終點(m)": [np.nan] * 5,
-    "下工水位(m)": [np.nan] * 5,
-    "上工水位(m)": [np.nan] * 5,
-    "手動漏水層判定(選填)": [None] * 5
-})
+# --- 漏水層判斷邏輯 ---
+def evaluate_water_layer(row):
+    down_wl = row.get('下工水位(m)', np.nan)
+    up_wl = row.get('上工水位(m)', np.nan)
+    total_depth = row.get('鑽探終點(m)', np.nan)
 
-if uploaded_file is not None:
+    # 確保空資料列不進行判定
+    if pd.isna(down_wl) and pd.isna(up_wl) and pd.isna(total_depth): return ""
+    if pd.isna(down_wl) and pd.isna(up_wl): return "完全漏水層"
+    if pd.isna(up_wl) and pd.notna(down_wl): return "漏水層"
+
+    drop_m = up_wl - down_wl
+    if pd.isna(drop_m): return "漏水層" # 防呆
+    
+    if drop_m <= 0.3: return "有水層"
+    else:
+        if pd.isna(total_depth) or total_depth == 0: return "資料不足"
+        ratio = drop_m / total_depth
+        if ratio < 0.5: return "部分漏水層"
+        else: return "漏水層"
+
+def get_final_layer(row):
+    manual = row.get('手動漏水層判定(選填)')
+    if pd.notna(manual) and str(manual).strip() != "":
+        return str(manual).strip()
+    return row.get('系統自動判定', '')
+
+# --- Session State 初始化與管理 ---
+if "my_df" not in st.session_state:
+    df = pd.DataFrame({
+        "工作天數": [np.nan] * 5,
+        "日期": [""] * 5,
+        "鑽探起點(m)": [np.nan] * 5,
+        "鑽探終點(m)": [np.nan] * 5,
+        "下工水位(m)": [np.nan] * 5,
+        "上工水位(m)": [np.nan] * 5,
+        "手動漏水層判定(選填)": [None] * 5
+    })
+    df["系統自動判定"] = df.apply(evaluate_water_layer, axis=1)
+    df["最終繪圖採用判定"] = df.apply(get_final_layer, axis=1)
+    st.session_state.my_df = df
+    st.session_state.last_uploaded_file = None
+
+# --- 處理 Excel 匯入 ---
+if uploaded_file is not None and uploaded_file.name != st.session_state.last_uploaded_file:
     try:
-        df_uploaded = pd.read_excel(uploaded_file)
+        df_up = pd.read_excel(uploaded_file)
         required_cols = ["工作天數", "日期", "鑽探起點(m)", "鑽探終點(m)", "下工水位(m)", "上工水位(m)"]
-        missing_cols = [col for col in required_cols if col not in df_uploaded.columns]
+        missing_cols = [col for col in required_cols if col not in df_up.columns]
         
         if missing_cols:
             st.error(f"❌ 上傳的 Excel 缺少以下必要表頭欄位：{', '.join(missing_cols)}。請修正後重新上傳。")
         else:
-            # 若上傳的檔案沒有手動判定欄位，則自動補上空欄位
-            if "手動漏水層判定(選填)" not in df_uploaded.columns:
-                df_uploaded["手動漏水層判定(選填)"] = None
-            default_data = df_uploaded[required_cols + ["手動漏水層判定(選填)"]] 
+            if "手動漏水層判定(選填)" not in df_up.columns:
+                df_up["手動漏水層判定(選填)"] = None
+                
+            df_up["系統自動判定"] = df_up.apply(evaluate_water_layer, axis=1)
+            df_up["最終繪圖採用判定"] = df_up.apply(get_final_layer, axis=1)
+            
+            st.session_state.my_df = df_up[required_cols + ["手動漏水層判定(選填)", "系統自動判定", "最終繪圖採用判定"]]
+            st.session_state.last_uploaded_file = uploaded_file.name
             st.success("✅ Excel 檔案讀取成功！您可以在下方表格繼續微調資料。")
+            st.rerun() # 重新載入畫面套用新資料
     except Exception as e:
         st.error(f"❌ 讀取 Excel 發生錯誤：{e}")
 
-# 將最後一欄設定為 Streamlit 的專屬下拉選單
+# --- 顯示即時運算表格 ---
 edited_df = st.data_editor(
-    default_data, 
+    st.session_state.my_df, 
     num_rows="dynamic", 
     use_container_width=False,
     column_config={
         "手動漏水層判定(選填)": st.column_config.SelectboxColumn(
             "手動漏水層判定(選填)",
-            help="若留空，系統將依文獻公式自動判定；若選擇，則強制採用您的選擇繪圖。",
+            help="若留空，將採用系統自動判定；若選擇，則強制採用。",
             options=["完全漏水層", "漏水層", "部分漏水層", "有水層"],
             required=False
-        )
+        ),
+        "系統自動判定": st.column_config.Column("系統自動判定", disabled=True),
+        "最終繪圖採用判定": st.column_config.Column("最終繪圖採用判定", disabled=True)
     }
 )
+
+# --- 即時重新運算與狀態同步 ---
+new_auto = edited_df.apply(evaluate_water_layer, axis=1)
+temp_df = edited_df.copy()
+temp_df["系統自動判定"] = new_auto
+new_final = temp_df.apply(get_final_layer, axis=1)
+
+has_changed = False
+if not new_auto.equals(edited_df["系統自動判定"]):
+    edited_df["系統自動判定"] = new_auto
+    has_changed = True
+if not new_final.equals(edited_df["最終繪圖採用判定"]):
+    edited_df["最終繪圖採用判定"] = new_final
+    has_changed = True
+
+# 若發現數值有變更，回寫至 session_state 並觸發畫面重繪，以更新表格內的唯讀欄位
+if has_changed:
+    st.session_state.my_df = edited_df
+    st.rerun()
+
 valid_df = edited_df.dropna(subset=['工作天數', '鑽探終點(m)']).copy()
-
-
-# ==========================================
-# 2. 漏水層判斷與結果呈現邏輯
-# ==========================================
-def evaluate_water_layer(row):
-    down_wl = row['下工水位(m)']
-    up_wl = row['上工水位(m)']
-    total_depth = row['鑽探終點(m)']
-
-    if pd.isna(down_wl) and pd.isna(up_wl): return "完全漏水層"
-    if pd.isna(up_wl) and pd.notna(down_wl): return "漏水層"
-
-    drop_m = up_wl - down_wl
-    if drop_m <= 0.3: return "有水層"
-    else:
-        ratio = drop_m / total_depth
-        if ratio < 0.5: return "部分漏水層"
-        else: return "漏水層"
-
-# 計算自動與最終判定結果
-if not valid_df.empty:
-    valid_df['系統自動判定'] = valid_df.apply(evaluate_water_layer, axis=1)
-    # 若使用者有手動選擇，則覆蓋系統判定；否則採用系統判定
-    valid_df['最終繪圖採用判定'] = valid_df.apply(
-        lambda row: row['手動漏水層判定(選填)'] if pd.notna(row['手動漏水層判定(選填)']) and str(row['手動漏水層判定(選填)']).strip() != "" else row['系統自動判定'], 
-        axis=1
-    )
-
-    # 顯示給使用者確認的即時結果表
-    st.write("🔍 **水層評估結果即時預覽**：")
-    st.dataframe(valid_df[['工作天數', '下工水位(m)', '上工水位(m)', '系統自動判定', '最終繪圖採用判定']], use_container_width=False)
 
 
 def fit_layer_text(label, seg_h_px, strip_px):
@@ -223,7 +251,7 @@ def fit_layer_text(label, seg_h_px, strip_px):
 
 
 # ==========================================
-# 3. CAD 成果圖（主圖）
+# 2. CAD 成果圖（主圖）
 # ==========================================
 st.write("---")
 st.subheader("📊 最終鑽探上下工水位成果圖")
@@ -292,7 +320,7 @@ if not valid_df.empty:
                      else f"<b>{start_d}~{end_d}m</b>")
         fig.add_annotation(x=(x_start + x_end) / 2, y=-2.75, text=depth_str, showarrow=False, font=dict(size=26))
 
-        # --- 左側漏水層色帶 (採用最終繪圖採用判定) ---
+        # --- 左側漏水層色帶 ---
         layer_type = row['最終繪圖採用判定']
         bg_color = LAYER_COLORS.get(layer_type, "white")
 
@@ -358,7 +386,7 @@ else:
 
 
 # ==========================================
-# 4. 側邊欄 (Sidebar) - 獨立圖例與系統工具
+# 3. 側邊欄 (Sidebar) - 獨立圖例與系統工具
 # ==========================================
 with st.sidebar:
     st.header("🔖 獨立圖例下載區")
