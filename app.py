@@ -27,7 +27,6 @@ LAYER_COLORS = {
     "漏水層": "#fff3e0",
 }
 
-
 def render_chart_with_download(fig, filename, btn_label, scale=2):
     """
     顯示圖表，並在圖上方放「下載 PNG」「下載 SVG」按鈕。
@@ -65,11 +64,15 @@ def render_chart_with_download(fig, filename, btn_label, scale=2):
 
 
 # ==========================================
-# 1. 資料輸入區
+# 1. 資料輸入區 (新增 Excel 批次上傳)
 # ==========================================
-st.write("請直接在下方表格輸入資料，系統將自動進行漏水層判估並產出 CAD 風格圖表：")
+st.write("您可以直接在下方表格輸入資料，或是上傳 Excel 檔案整批匯入，系統將自動進行漏水層判估並產出 CAD 風格圖表：")
 st.write("💡 **提示**：往下新增資料時，請確實填入「工作天數」與「鑽探終點(m)」，圖表才會更新。")
 
+# 新增：Excel 檔案上傳元件
+uploaded_file = st.file_uploader("📂 匯入 Excel 檔案 (選填)", type=["xlsx", "xls"])
+
+# 預設資料
 default_data = pd.DataFrame({
     "工作天數": [1.0, 2.0, 3.0, 4.0, 5.0],
     "日期": ["3/11", "3/12", "3/13", "3/14", "3/15"],
@@ -79,6 +82,23 @@ default_data = pd.DataFrame({
     "上工水位(m)": [np.nan, 9.2, 13.8, 23.2, np.nan]
 })
 
+# 若有上傳檔案，則覆蓋預設資料
+if uploaded_file is not None:
+    try:
+        df_uploaded = pd.read_excel(uploaded_file)
+        # 定義必備欄位
+        required_cols = ["工作天數", "日期", "鑽探起點(m)", "鑽探終點(m)", "下工水位(m)", "上工水位(m)"]
+        missing_cols = [col for col in required_cols if col not in df_uploaded.columns]
+        
+        if missing_cols:
+            st.error(f"❌ 上傳的 Excel 缺少以下必要表頭欄位：{', '.join(missing_cols)}。請修正後重新上傳。")
+        else:
+            default_data = df_uploaded[required_cols] # 替換預設資料
+            st.success("✅ Excel 檔案讀取成功！您可以在下方表格繼續微調資料。")
+    except Exception as e:
+        st.error(f"❌ 讀取 Excel 發生錯誤：{e}")
+
+# 顯示可編輯表格
 edited_df = st.data_editor(default_data, num_rows="dynamic", use_container_width=False)
 
 # 防呆：自動過濾掉還沒輸入完成的空白列，避免報錯
