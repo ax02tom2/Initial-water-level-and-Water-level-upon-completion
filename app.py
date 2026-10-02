@@ -11,10 +11,18 @@ st.title("💧 地下水位自動評估繪圖系統")
 # ==========================================
 RULER_X = -0.4      # 深度尺所在 x 位置
 STRIP_X1 = 0.2      # 漏水層色帶右邊界（色帶寬 = STRIP_X1 - RULER_X）
-X0 = 1.5            # 第 1 天資料欄的起點（越大，資料區離左側色帶越遠）
+X0 = 2.1            # 第 1 天資料欄的起點（越大，資料區離左側色帶越遠）
 LABEL_W = 1.3       # 「工作天數／鑽探進尺」表頭格寬度
 CHART_H = 1000      # 圖高 (px)
-CHART_W_EST = 1300  # 估計圖寬 (px)，只用來估算漏水層文字大小
+COL_PX = 165        # 每一天欄位的寬度 (px)；圖寬會依天數自動計算，不再留白
+MIN_W, MAX_W = 900, 1900   # 圖寬下限 / 上限 (px)
+
+LAYER_COLORS = {
+    "完全漏水層": "#f0f0f0",
+    "有水層": "#e3f2fd",
+    "部分漏水層": "#e8f5e9",
+    "漏水層": "#fff3e0",
+}
 
 # ==========================================
 # 1. 資料輸入區
@@ -72,17 +80,14 @@ def fit_layer_text(label, seg_h_px, strip_px):
     n = len(label)
     for f in range(20, 9, -1):
         line_h = f * 1.25
-        # 方案 1：直排單欄
         if f * 1.1 <= strip_px * 0.9 and n * line_h <= seg_h_px * 0.92:
             return "<br>".join(label), f
-        # 方案 2：分兩排
         if n >= 4:
             k = n // 2
             rows = [label[:k], label[k:]]
             w = max(len(r) for r in rows) * f * 1.05
             if w <= strip_px * 0.92 and 2 * line_h <= seg_h_px * 0.92:
                 return "<br>".join(rows), f
-    # 最小字級仍放不下時的保底
     if n >= 4:
         k = n // 2
         return label[:k] + "<br>" + label[k:], 10
@@ -101,27 +106,41 @@ if not valid_df.empty:
     max_depth = int(valid_df['鑽探終點(m)'].max())
     max_days = len(valid_df)
 
-    x_min = -1.8
-    x_max = X0 + max_days + 0.2
+    x_min = -1.5
+    x_max = X0 + max_days + 0.05      # 右側幾乎不留白
     y_top = -6.0
     y_bot = max_depth + 2
 
-    # 估算每單位對應的像素，用來自動調整漏水層文字
-    px_per_x = (CHART_W_EST - 40) / (x_max - x_min)
+    # 圖寬依天數自動決定（固定寬度，像素換算才精準）
+    chart_w = int(max(MIN_W, min(MAX_W, COL_PX * (x_max - x_min))))
+    px_per_x = (chart_w - 40) / (x_max - x_min)
     px_per_y = (CHART_H - 40) / (y_bot - y_top)
     strip_px = (STRIP_X1 - RULER_X) * px_per_x
     strip_cx = (RULER_X + STRIP_X1) / 2
 
+    def dx(px):
+        return px / px_per_x
+
+    def dy(px):
+        return px / px_per_y
+
     # --------------------------------------------------
-    # 圖例位置（先算好，虛線才知道要避開）
+    # 圖例幾何（以「像素」設計，再換算成座標；靠右上角、寬度精簡）
     # --------------------------------------------------
-    leg_x0 = X0 + max_days - 1.9
-    leg_x1 = X0 + max_days - 0.1
-    leg_y0 = 0.5
-    leg_y1 = leg_y0 + 5.5
+    LEG_W, LEG_H = 215, 335
+    leg_x1 = x_max - dx(6)
+    leg_x0 = leg_x1 - dx(LEG_W)
+    leg_y0 = 0.3
+    leg_y1 = leg_y0 + dy(LEG_H)
+
+    def lx(px):
+        return leg_x0 + dx(px)
+
+    def ly(px):
+        return leg_y0 + dy(px)
 
     def add_dotted_v(x, ya, yb):
-        """畫垂直點線；經過圖例範圍時自動斷開，避免穿過圖例文字"""
+        """畫垂直點線；經過圖例範圍時自動斷開，避免穿過圖例"""
         if yb <= ya:
             return
         segs = [(ya, yb)]
@@ -156,7 +175,7 @@ if not valid_df.empty:
             fig.add_shape(type="line", x0=RULER_X, y0=d, x1=-0.5, y1=d, line=dict(color="black", width=1))
 
     # --------------------------------------------------
-    # (B) 頂部表格標題（往右移，與左側色帶拉開距離）
+    # (B) 頂部表格標題
     # --------------------------------------------------
     lx0 = X0 - LABEL_W
     lx1 = X0
@@ -167,47 +186,53 @@ if not valid_df.empty:
     fig.add_annotation(x=lcx, y=-2.75, text="<b>鑽探進尺</b>", showarrow=False, font=dict(size=24))
 
     # --------------------------------------------------
-    # (C) 圖例
-    #   ※ 白底框改放 layer="below"，三角形(trace)才不會被蓋住
+    # (C) 圖例：水位符號 + 漏水層色塊說明
+    #   白底框 layer="below"，三角形(trace)才不會被蓋住
     # --------------------------------------------------
     fig.add_shape(type="rect", x0=leg_x0, y0=leg_y0, x1=leg_x1, y1=leg_y1,
                   fillcolor="white", line=dict(color="black", width=2), layer="below")
-    fig.add_annotation(x=leg_x0 + 0.1, y=leg_y0 + 0.8, text="<b>(單位：m)</b>", showarrow=False,
-                       xanchor="left", font=dict(size=18))
-    fig.add_annotation(x=leg_x0 + 0.1, y=leg_y0 + 1.6, text="<b>圖例</b>", showarrow=False,
-                       xanchor="left", font=dict(size=22))
 
-    # 下工圖例 (空心三角形)
+    # 標題
+    fig.add_annotation(x=lx(14), y=ly(20), text="<b>圖例（單位：m）</b>", showarrow=False,
+                       xanchor="left", font=dict(size=17, color="black"))
+    fig.add_shape(type="line", x0=lx(8), y0=ly(38), x1=lx(LEG_W - 8), y1=ly(38),
+                  line=dict(color="black", width=1))
+
+    # 水位符號三列（間距 40px，符號在左、文字在右）
+    r1, r2, r3 = 66, 106, 146
+    sym_x, txt_x = 34, 68
+
     fig.add_trace(go.Scatter(
-        x=[leg_x0 + 0.25], y=[leg_y0 + 2.8], mode="markers",
-        marker=dict(symbol="triangle-down-open", size=22, color="black", line=dict(width=2.5)),
+        x=[lx(sym_x)], y=[ly(r1)], mode="markers",
+        marker=dict(symbol="triangle-down-open", size=20, color="black", line=dict(width=2.5)),
         hoverinfo="skip"))
-    fig.add_shape(type="line", x0=leg_x0 + 0.25, y0=leg_y0 + 2.8, x1=leg_x0 + 0.25, y1=leg_y0 + 4.6,
-                  line=dict(dash="dash", color="black", width=1.5), layer="above")
-    fig.add_shape(type="line", x0=leg_x0 + 0.25, y0=leg_y0 + 2.8, x1=leg_x0 + 0.6, y1=leg_y0 + 2.8,
-                  line=dict(color="black", width=1.5), layer="above")
-    fig.add_annotation(x=leg_x0 + 0.7, y=leg_y0 + 2.8, text="<b>當日下工水位</b>", showarrow=False,
-                       xanchor="left", font=dict(size=20))
+    fig.add_annotation(x=lx(txt_x), y=ly(r1), text="<b>當日下工水位</b>", showarrow=False,
+                       xanchor="left", font=dict(size=17, color="black"))
 
-    # 上工圖例 (實心三角形)
     fig.add_trace(go.Scatter(
-        x=[leg_x0 + 0.45], y=[leg_y0 + 3.8], mode="markers",
-        marker=dict(symbol="triangle-down", size=22, color="black"),
+        x=[lx(sym_x)], y=[ly(r2)], mode="markers",
+        marker=dict(symbol="triangle-down", size=20, color="black"),
         hoverinfo="skip"))
-    fig.add_shape(type="line", x0=leg_x0 + 0.45, y0=leg_y0 + 3.8, x1=leg_x0 + 0.45, y1=leg_y0 + 4.6,
-                  line=dict(dash="dash", color="black", width=1.5), layer="above")
-    fig.add_shape(type="line", x0=leg_x0 + 0.45, y0=leg_y0 + 3.8, x1=leg_x0 + 0.6, y1=leg_y0 + 3.8,
-                  line=dict(color="black", width=1.5), layer="above")
-    fig.add_annotation(x=leg_x0 + 0.7, y=leg_y0 + 3.8, text="<b>翌日上工水位</b>", showarrow=False,
-                       xanchor="left", font=dict(size=20))
+    fig.add_annotation(x=lx(txt_x), y=ly(r2), text="<b>翌日上工水位</b>", showarrow=False,
+                       xanchor="left", font=dict(size=17, color="black"))
 
-    # 進尺底線圖例
-    fig.add_shape(type="line", x0=leg_x0 + 0.1, y0=leg_y0 + 4.6, x1=leg_x0 + 0.5, y1=leg_y0 + 4.6,
-                  line=dict(color="black", width=2), layer="above")
-    fig.add_shape(type="line", x0=leg_x0 + 0.5, y0=leg_y0 + 4.6, x1=leg_x0 + 0.6, y1=leg_y0 + 4.6,
-                  line=dict(dash="dash", color="black", width=1.5), layer="above")
-    fig.add_annotation(x=leg_x0 + 0.7, y=leg_y0 + 4.6, text="<b>當日鑽探進尺</b>", showarrow=False,
-                       xanchor="left", font=dict(size=20))
+    fig.add_shape(type="line", x0=lx(14), y0=ly(r3), x1=lx(54), y1=ly(r3),
+                  line=dict(color="black", width=3), layer="above")
+    fig.add_annotation(x=lx(txt_x), y=ly(r3), text="<b>當日鑽探進尺</b>", showarrow=False,
+                       xanchor="left", font=dict(size=17, color="black"))
+
+    # 漏水層色塊說明
+    fig.add_shape(type="line", x0=lx(8), y0=ly(172), x1=lx(LEG_W - 8), y1=ly(172),
+                  line=dict(color="black", width=1))
+    fig.add_annotation(x=lx(14), y=ly(192), text="<b>漏水層分類</b>", showarrow=False,
+                       xanchor="left", font=dict(size=16, color="black"))
+
+    for i, name in enumerate(["完全漏水層", "有水層", "部分漏水層", "漏水層"]):
+        ry = 224 + i * 32
+        fig.add_shape(type="rect", x0=lx(14), y0=ly(ry - 11), x1=lx(50), y1=ly(ry + 11),
+                      fillcolor=LAYER_COLORS[name], line=dict(color="black", width=1), layer="above")
+        fig.add_annotation(x=lx(62), y=ly(ry), text=f"<b>{name}</b>", showarrow=False,
+                           xanchor="left", font=dict(size=16, color="black"))
 
     # --------------------------------------------------
     # (D) 主體繪製：迴圈跑每一天的資料
@@ -235,8 +260,7 @@ if not valid_df.empty:
 
         # --- 左側漏水層色帶（文字自動排版，不超出色帶）---
         layer_type = evaluate_water_layer(row)
-        bg_color = {"完全漏水層": "#f0f0f0", "有水層": "#e3f2fd",
-                    "部分漏水層": "#e8f5e9", "漏水層": "#fff3e0"}.get(layer_type, "white")
+        bg_color = LAYER_COLORS.get(layer_type, "white")
 
         fig.add_shape(type="rect", x0=RULER_X, y0=start_d, x1=STRIP_X1, y1=end_d,
                       fillcolor=bg_color, line=dict(color="black", width=1))
@@ -250,16 +274,14 @@ if not valid_df.empty:
         fig.add_shape(type="line", x0=x_start, y0=prev_depth, x1=x_start, y1=end_d, line=dict(color="black", width=2))
         fig.add_shape(type="line", x0=x_start, y0=end_d, x1=x_end, y1=end_d, line=dict(color="black", width=2))
 
-        # 從色帶拉到階梯轉折處的水平點線
         fig.add_shape(type="line", x0=STRIP_X1, y0=end_d, x1=x_start, y1=end_d,
                       line=dict(color="black", width=1.5, dash="dot"))
-        # 表頭往下的垂直點線
         add_dotted_v(x_start, -2.0, prev_depth)
 
         if idx_i == len(valid_df) - 1:
             add_dotted_v(x_end, -2.0, end_d)
 
-        # --- 轉折處標示深度：標在直角(x_start, end_d)的左上方，比照範例圖 ---
+        # --- 轉折處標示深度：直角(x_start, end_d)左上方 ---
         corner_text = f"{int(end_d)}m" if float(end_d).is_integer() else f"{end_d}m"
         fig.add_annotation(
             x=x_start, y=end_d,
@@ -274,7 +296,6 @@ if not valid_df.empty:
         wl_down = row['下工水位(m)']
         wl_up = row['上工水位(m)']
 
-        # 當日下工 (▽)
         if pd.notna(wl_down):
             x_pos = x_start + 0.3
             fig.add_shape(type="line", x0=x_pos, y0=wl_down, x1=x_pos, y1=end_d,
@@ -293,7 +314,6 @@ if not valid_df.empty:
                 font=dict(size=24, color="black")
             )
 
-        # 翌日上工 (▼)
         if pd.notna(wl_up):
             x_pos = x_start + 0.7
             fig.add_shape(type="line", x0=x_pos, y0=wl_up, x1=x_pos, y1=end_d,
@@ -318,6 +338,7 @@ if not valid_df.empty:
     # 4. 關閉 Plotly 預設坐標軸並設定範圍
     # --------------------------------------------------
     fig.update_layout(
+        width=chart_w,
         height=CHART_H,
         showlegend=False,
         plot_bgcolor='white',
@@ -326,6 +347,6 @@ if not valid_df.empty:
         yaxis=dict(visible=False, autorange="reversed", range=[y_bot, y_top])
     )
 
-    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+    st.plotly_chart(fig, use_container_width=False, config={'displayModeBar': False})
 else:
     st.info("請在上方表格輸入工作天數及鑽探終點深度，圖表將會自動生成。")
