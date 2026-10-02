@@ -9,31 +9,47 @@ import streamlit.components.v1 as components
 st.set_page_config(page_title="鑽探上下工水位自動繪圖系統", layout="wide")
 
 # ==========================================
-# 新增：網頁專屬背景圖 (刷淡 65%、毛邊模糊處理)
+# 網頁專屬背景圖 (刷淡 65%、毛邊模糊處理、防遮擋設計)
 # ==========================================
-# 預設使用一張地質/工程相關的圖片，您可以替換 background-image 裡的 URL 為其他圖片網址
 page_bg_img = '''
 <style>
-.stApp::before {
-    content: "";
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100vw;
-    height: 100vh;
-    /* 鑽探/地質相關底圖網址 */
-    background-image: url("https://images.unsplash.com/photo-1504307651254-35680f356dfd?q=80&w=2070&auto=format&fit=crop"); 
+/* 1. 將背景圖綁定在 Streamlit 最外層主容器 */
+[data-testid="stAppViewContainer"] {
+    background-image: url("https://images.unsplash.com/photo-1504307651254-35680f356dfd?q=80&w=2070&auto=format&fit=crop");
     background-size: cover;
     background-position: center;
-    opacity: 0.35;         /* 刷淡約 65% (保留 35% 不透明度) */
-    filter: blur(15px);    /* 毛邊/模糊效果 */
-    transform: scale(1.05);/* 稍微放大避免模糊後邊緣產生白邊 */
-    z-index: -1;           /* 確保放置於最底層，不影響表格與按鈕點擊 */
+    background-attachment: fixed;
+}
+/* 2. 利用 ::before 疊加一層 65% 白色遮罩與毛邊模糊 */
+[data-testid="stAppViewContainer"]::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(255, 255, 255, 0.65); /* 65% 刷白 */
+    backdrop-filter: blur(12px);                 /* 毛玻璃效果 */
+    pointer-events: none;                        /* 穿透點擊，避免按鈕失效 */
+    z-index: 0;                                  /* 定位在底層 */
+}
+/* 3. 隱藏預設的頂部白條 */
+[data-testid="stHeader"] {
+    background-color: transparent !important;
+}
+/* 4. 將主要內容區塊拉上來，並加上一層微透明質感面板，確保資料易讀 */
+.block-container {
+    position: relative;
+    z-index: 1;
+    background-color: rgba(255, 255, 255, 0.65);
+    border-radius: 15px;
+    padding: 2rem;
+    margin-top: 1rem;
+    box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.15);
 }
 </style>
 '''
 st.markdown(page_bg_img, unsafe_allow_html=True)
-
 
 st.title("💧 鑽探上下工水位自動繪圖系統")
 
@@ -57,12 +73,6 @@ LAYER_COLORS = {
 
 
 def render_chart_with_download(fig, filename, btn_label, scale=2):
-    """
-    顯示圖表，並在圖上方放「下載 PNG」「下載 SVG」按鈕。
-    由瀏覽器端的 Plotly 直接輸出圖檔，不需要螢幕截圖，也不需安裝 kaleido。
-      - PNG：點陣圖，直接貼進 Word / 簡報
-      - SVG：向量圖，可用 Illustrator / Inkscape / PPT 再編輯，放大不糊
-    """
     div_id = "plt_" + uuid.uuid4().hex[:8]
     w = int(fig.layout.width)
     h = int(fig.layout.height)
