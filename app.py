@@ -6,15 +6,13 @@ import numpy as np
 # 網頁基本設定
 st.set_page_config(page_title="地下水位與漏水層自動評估系統", layout="wide")
 st.title("💧 地下水位與漏水層自動評估系統")
-st.markdown("將現場上下工水位資料化為自動判估與可視化圖表，取代傳統 CAD 繪圖與人工判定。")
 
 # ==========================================
-# 第一部分：資料輸入區[cite: 1]
+# 第一部分：資料輸入區 (單一窄版表格)
 # ==========================================
-st.subheader("📝 1. 現場水位與鑽探資料輸入")
-st.write("請直接在下方表格修改「當日下工水位」與「翌日上工水位」等數值，系統會即時重新運算。")
+st.write("請在下方表格輸入深度與水位資料（圖表會自動套用文獻規則並即時更新）:")
 
-# 建立預設資料表 (對應您提供的 Excel 範例結構)
+# 預設資料
 default_data = pd.DataFrame({
     "工作天數": [1, 2, 3, 4, 5],
     "鑽探起點深度(m)": [0.0, 3.0, 10.0, 15.0, 24.0],
@@ -23,142 +21,157 @@ default_data = pd.DataFrame({
     "翌日上工水位(m)": [np.nan, 9.2, 13.8, 23.2, np.nan]
 })
 
-# 使用 st.data_editor 讓使用者能在網頁上像 Excel 一樣編輯資料[cite: 1]
-edited_df = st.data_editor(default_data, num_rows="dynamic", use_container_width=True)
+# 取消過度拉寬，保留適當的欄寬
+edited_df = st.data_editor(default_data, num_rows="dynamic", use_container_width=False)
 
 # ==========================================
-# 第二部分：漏水層自動判斷邏輯[cite: 2]
+# 第二部分：漏水層自動判斷邏輯
 # ==========================================
 def evaluate_water_layer(row):
     down_wl = row['當日下工水位(m)']
     up_wl = row['翌日上工水位(m)']
     total_depth = row['鑽探終點深度(m)']
     
-    # 規則 H：當日下工及翌日上工均無地下水 -> 完全漏水層[cite: 2]
+    # 規則 H：均無水 -> 完全漏水層
     if pd.isna(down_wl) and pd.isna(up_wl):
         return "完全漏水層"
-        
-    # 如果翌日無水，通常視為嚴重漏水層
+    # 規則 F/G：翌日無水 -> 漏水層
     if pd.isna(up_wl) and pd.notna(down_wl):
-        return "漏水層 (無水)"
+        return "漏水層"
         
-    # 計算水位變化 (數值越大代表深度越深；所以 up_wl > down_wl 代表水位下降)
     drop_m = up_wl - down_wl
     
-    # 規則 A/B/C/D：上升或無明顯變化 (這裡容許 0.3m 內的微小波動視為無明顯變化) -> 有水層[cite: 2]
+    # 規則 A~D：無明顯變化(容許0.3m內波動)或上升 -> 有水層
     if drop_m <= 0.3:
         return "有水層"
     else:
-        # 計算下降幅度比例：(翌日上工水位 - 當日下工水位) / 當日總累計鑽探進尺深度[cite: 2]
+        # 下降幅度比例
         ratio = drop_m / total_depth
-        
-        # 規則 E：翌日上工水位小幅度下降 (下降幅度 < 50%) -> 部分漏水層[cite: 2]
+        # 規則 E：小幅度下降 -> 部分漏水層
         if ratio < 0.5:
             return "部分漏水層"
-        # 規則 F/G：翌日上工水位大幅度下降 (下降幅度 > 50%) -> 漏水層[cite: 2]
+        # 規則 F/G：大幅度下降 -> 漏水層
         else:
             return "漏水層"
 
-# 執行判定並將結果加入 Dataframe
-edited_df['漏水層判定'] = edited_df.apply(evaluate_water_layer, axis=1)
-
-st.write("💡 **自動判估結果** (依照文獻規則判定)：")
-st.dataframe(edited_df[['工作天數', '鑽探終點深度(m)', '當日下工水位(m)', '翌日上工水位(m)', '漏水層判定']], use_container_width=True)
-
 # ==========================================
-# 第三部分：自動生成 CAD 風格成果圖[cite: 3]
+# 第三部分：完美還原 CAD 成果圖
 # ==========================================
-st.subheader("📊 2. 自動產出水位與鑽探剖面成果圖")
+st.write("---")
+st.write("📊 **水位與鑽探剖面成果圖**")
 
 fig = go.Figure()
 
-# 1. 繪製階梯狀的鑽探進尺輪廓線[cite: 3]
-x_steps = [0.5]
-y_steps = [0.0]
+prev_depth = 0
+max_depth = edited_df['鑽探終點深度(m)'].max() if not edited_df.empty else 30
 
-for i, row in edited_df.iterrows():
-    day = row['工作天數']
+for idx, row in edited_df.iterrows():
+    day_i = int(row['工作天數'])
+    x_start = day_i - 1  # 該天的左邊界
+    x_end = day_i        # 該天的右邊界
     start_d = row['鑽探起點深度(m)']
     end_d = row['鑽探終點深度(m)']
     
-    # 建立階梯的 X, Y 座標點[cite: 3]
-    x_steps.extend([day - 0.5, day + 0.5])
-    y_steps.extend([start_d, start_d])
-    x_steps.extend([day + 0.5, day + 0.5])
-    y_steps.extend([start_d, end_d])
-
-# 將輪廓線加入圖表中
-fig.add_trace(go.Scatter(
-    x=x_steps, y=y_steps, 
-    mode='lines', 
-    line=dict(color='black', width=2), 
-    name='鑽探進尺',
-    hoverinfo='skip'
-))
-
-# 定義不同漏水層的對應背景顏色[cite: 3]
-layer_colors = {
-    "完全漏水層": "#e0e0e0",   # 灰色
-    "有水層": "#cce5ff",     # 淡藍色
-    "部分漏水層": "#d4edda", # 淡綠色
-    "漏水層": "#fff3cd",     # 橘黃色
-    "漏水層 (無水)": "#fff3cd"
-}
-
-# 2. 繪製水位標示 (▼, ∇) 與左側背景色塊[cite: 3]
-for i, row in edited_df.iterrows():
-    day = row['工作天數']
-    layer_type = row['漏水層判定']
+    # --------------------------------------------------
+    # 1. 繪製左側小小的漏水層判定區塊 (X座標介於 -1 到 0 之間)
+    # --------------------------------------------------
+    layer_type = evaluate_water_layer(row)
+    colors = {
+        "完全漏水層": "#e6e6e6",  # 灰色
+        "有水層": "#e3f2fd",      # 淺藍色
+        "部分漏水層": "#e8f5e9",  # 淺綠色
+        "漏水層": "#fff3e0"       # 淺橘色
+    }
+    bg_color = colors.get(layer_type, "#ffffff")
     
-    # 畫出對應深度的背景色塊以標示地層屬性[cite: 3]
-    fig.add_hrect(
-        y0=row['鑽探起點深度(m)'], y1=row['鑽探終點深度(m)'],
-        fillcolor=layer_colors.get(layer_type, "white"), opacity=0.4,
-        layer="below", line_width=0,
-        annotation_text=f"<b>{layer_type}</b>", annotation_position="top left"
-    )
+    # 畫背景色塊
+    fig.add_shape(type="rect", x0=-1, y0=start_d, x1=0, y1=end_d,
+                  fillcolor=bg_color, line=dict(color="black", width=1))
+                  
+    # 寫入垂直文字 (用 <br> 將每個字斷行)
+    vertical_text = "<br>".join(list(layer_type))
+    fig.add_annotation(x=-0.5, y=(start_d + end_d)/2, text=vertical_text,
+                       showarrow=False, font=dict(size=12, color="black"))
+
+    # --------------------------------------------------
+    # 2. 繪製階梯狀的鑽探進尺 (實心黑線)
+    # --------------------------------------------------
+    # 垂直下切線
+    fig.add_shape(type="line", x0=x_start, y0=prev_depth, x1=x_start, y1=end_d,
+                  line=dict(color="black", width=2))
+    # 水平底線
+    fig.add_shape(type="line", x0=x_start, y0=end_d, x1=x_end, y1=end_d,
+                  line=dict(color="black", width=2))
     
-    # 標示「當日下工水位」 (空心倒三角形)[cite: 3]
-    if pd.notna(row['當日下工水位(m)']):
-        fig.add_trace(go.Scatter(
-            x=[day - 0.2], y=[row['當日下工水位(m)']],
-            mode='markers+text',
-            marker=dict(symbol='triangle-down-open', size=14, color='black', line=dict(width=2)),
-            text=[f"{row['當日下工水位(m)']} ∇"], textposition="top center",
-            name=f'第{day}天 下工',
-            hovertemplate=f"當日下工: {row['當日下工水位(m)']}m<extra></extra>"
-        ))
-        # 連接水位與階梯的輔助虛線
-        fig.add_shape(type="line", x0=day - 0.2, y0=row['當日下工水位(m)'], x1=day - 0.2, y1=row['鑽探起點深度(m)'], line=dict(dash="dot", color="gray"))
+    # 每天的分界線 (垂直點線)
+    fig.add_shape(type="line", x0=x_end, y0=0, x1=x_end, y1=max_depth,
+                  line=dict(color="gray", width=1, dash="dot"))
 
-    # 標示「翌日上工水位」 (實心倒三角形)[cite: 3]
-    if pd.notna(row['翌日上工水位(m)']):
+    # --------------------------------------------------
+    # 3. 繪製上下工水位符號與虛線 (CAD 箭頭風格)
+    # --------------------------------------------------
+    wl_down = row['當日下工水位(m)']
+    wl_up = row['翌日上工水位(m)']
+    
+    # 當日下工 (▽ 空心倒三角)
+    if pd.notna(wl_down):
+        x_pos = x_start + 0.3
+        # 往下延伸的虛線
+        fig.add_shape(type="line", x0=x_pos, y0=wl_down, x1=x_pos, y1=end_d,
+                      line=dict(color="black", width=1, dash="dash"))
+        # ▽ 符號與文字
         fig.add_trace(go.Scatter(
-            x=[day + 0.2], y=[row['翌日上工水位(m)']],
-            mode='markers+text',
-            marker=dict(symbol='triangle-down', size=14, color='black'),
-            text=[f"{row['翌日上工水位(m)']} ▼"], textposition="bottom center",
-            name=f'第{day}天 上工',
-            hovertemplate=f"翌日上工: {row['翌日上工水位(m)']}m<extra></extra>"
+            x=[x_pos], y=[wl_down], mode="markers+text",
+            marker=dict(symbol="triangle-down-open", size=14, color="black", line=dict(width=1.5)),
+            text=[str(wl_down)], textposition="top center", textfont=dict(size=12, color="black"),
+            hoverinfo="skip"
         ))
-        # 連接水位與階梯的輔助虛線
-        fig.add_shape(type="line", x0=day + 0.2, y0=row['翌日上工水位(m)'], x1=day + 0.2, y1=row['鑽探終點深度(m)'], line=dict(dash="dot", color="gray"))
+        
+    # 翌日上工 (▼ 實心倒三角)
+    if pd.notna(wl_up):
+        x_pos = x_start + 0.7
+        # 往下延伸的虛線
+        fig.add_shape(type="line", x0=x_pos, y0=wl_up, x1=x_pos, y1=end_d,
+                      line=dict(color="black", width=1, dash="dash"))
+        # ▼ 符號與文字
+        fig.add_trace(go.Scatter(
+            x=[x_pos], y=[wl_up], mode="markers+text",
+            marker=dict(symbol="triangle-down", size=14, color="black"),
+            text=[str(wl_up)], textposition="top center", textfont=dict(size=12, color="black"),
+            hoverinfo="skip"
+        ))
 
-# 3. 圖表版面配置調整 (反轉 Y 軸)[cite: 3]
+    prev_depth = end_d
+
+# --------------------------------------------------
+# 4. 圖表排版與坐標軸設定 (符合每公尺刻度要求)
+# --------------------------------------------------
 fig.update_layout(
-    yaxis=dict(autorange="reversed", title="深度 (m)", tickfont=dict(size=14)),
-    xaxis=dict(title="工作天數", tickmode='array', tickvals=edited_df['工作天數'], side='top', tickfont=dict(size=14)),
-    height=700,
+    height=850, # 拉高圖表讓 1m 刻度不會太擠
     showlegend=False,
     plot_bgcolor='white',
-    margin=dict(l=50, r=50, t=80, b=50)
+    margin=dict(l=40, r=40, t=60, b=40),
+    xaxis=dict(
+        showgrid=False,
+        zeroline=False,
+        side='top',
+        tickmode='array',
+        tickvals=[0.5, 1.5, 2.5, 3.5, 4.5],
+        ticktext=["第1天", "第2天", "第3天", "第4天", "第5天"],
+        range=[-1, len(edited_df)]
+    ),
+    yaxis=dict(
+        title="深度(m)",
+        autorange="reversed",
+        showgrid=True,          
+        gridcolor="#f0f0f0",    
+        zeroline=False,
+        showline=True,
+        linecolor="black",
+        linewidth=1,
+        dtick=1, # <--- 強制每一公尺顯示一個刻度
+        tickfont=dict(size=11)
+    )
 )
 
-# 加上格線與外框
-fig.update_xaxes(showline=True, linewidth=1, linecolor='black', gridcolor='#EEEEEE')
-fig.update_yaxes(showline=True, linewidth=1, linecolor='black', gridcolor='#EEEEEE')
-
-# 渲染圖表
-st.plotly_chart(fig, use_container_width=True)
-
-st.success("✅ 評估完成！您可以隨時在上方表格修改資料，本圖表與判定結果將自動更新。如需部署至雲端，只需將此腳本上傳至 GitHub 並連接 Streamlit Community Cloud 即可。")
+st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
