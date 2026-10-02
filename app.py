@@ -6,8 +6,8 @@ import json
 import uuid
 import streamlit.components.v1 as components
 
-st.set_page_config(page_title="地下水位自動評估繪圖系統", layout="wide")
-st.title("💧 地下水位自動評估繪圖系統")
+st.set_page_config(page_title="上下工水位自動繪圖系統", layout="wide")
+st.title("💧 上下工水位自動繪圖系統")
 
 # ==========================================
 # 版面參數（想微調位置，改這裡即可）
