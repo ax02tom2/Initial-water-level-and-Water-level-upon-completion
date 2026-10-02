@@ -6,10 +6,11 @@ import json
 import uuid
 import streamlit.components.v1 as components
 
-st.set_page_config(page_title="鑽探上下工水位自動繪圖系統", layout="wide")
+# 設定 initial_sidebar_state="expanded" 讓側邊欄預設展開
+st.set_page_config(page_title="鑽探上下工水位自動繪圖系統", layout="wide", initial_sidebar_state="expanded")
 
 # ==========================================
-# 網頁專屬背景圖 (刷淡 65%、毛邊模糊處理、防遮擋設計)
+# 網頁專屬背景圖 (刷淡 65%、毛邊模糊處理)
 # ==========================================
 page_bg_img = '''
 <style>
@@ -52,9 +53,6 @@ st.title("💧 鑽探上下工水位自動繪圖系統")
 # ==========================================
 # ⚙️ [可自訂參數區]：文獻參考資料 (摺疊面板)
 # ==========================================
-# 調整說明：
-# 1. 調整 `font-size: 20px` 裡的數字，可以把說明文字變大或變小。
-# 2. 調整 `width=800` 的數字，可以控制圖片的顯示最大寬度，避免因強迫撐滿螢幕而產生模糊毛邊。
 with st.expander("📖 點此查看：文獻資料與漏水層判定定義"):
     st.markdown("""
     <div style="font-size: 20px; line-height: 1.6; margin-bottom: 15px; color: #333;">
@@ -64,14 +62,13 @@ with st.expander("📖 點此查看：文獻資料與漏水層判定定義"):
     </div>
     """, unsafe_allow_html=True)
     try:
-        # 載入同資料夾內的文獻圖片，限制寬度避免模糊
         st.image("image_2c1a61.jpg", caption="孔內地下水位變化示意圖及說明", width=800)
     except Exception:
         st.warning("⚠️ 找不到圖片檔案。請確認 'image_2c1a61.jpg' 是否與 app.py 放在同一個資料夾。")
 
 
 # ==========================================
-# ⚙️ [可自訂參數區]：版面參數（想微調位置，改這裡即可）
+# ⚙️️ [可自訂參數區]：版面與圖表微調參數
 # ==========================================
 RULER_X = -0.4      # 深度尺所在 x 位置
 STRIP_X1 = 0.2      # 漏水層色帶右邊界（色帶寬 = STRIP_X1 - RULER_X）
@@ -87,6 +84,11 @@ LAYER_COLORS = {
     "部分漏水層": "#e8f5e9",
     "漏水層": "#fff3e0",
 }
+
+# --- 新增：主圖內鑲嵌圖例的位置參數 ---
+# 調整說明：若主圖的鑽探線條剛好擋到圖例，可在此修改位置
+LEG_X_OFFSET = 0.0  # 圖例左右平移 (正值往右移，負值往左移)
+LEG_Y = 0.5         # 圖例上下平移 (代表深度 m，數值越大越往下)
 
 
 def render_chart_with_download(fig, filename, btn_label, scale=2):
@@ -127,11 +129,6 @@ st.write("💡 **提示**：往下新增資料時，請確實填入「工作天�
 
 uploaded_file = st.file_uploader("📂 匯入 Excel 檔案 (選填)", type=["xlsx", "xls"])
 
-# ==========================================
-# ⚙️ [可自訂參數區]：網頁初始化的預設表格內容
-# ==========================================
-# 調整說明：使用 np.nan (空數值) 與 "" (空字串) 產生乾淨的表格
-# 預設 [np.nan] * 5 代表產生 5 個空列，想增加預設行數可將 5 改為其他數字
 default_data = pd.DataFrame({
     "工作天數": [np.nan] * 5,
     "日期": [""] * 5,
@@ -156,7 +153,6 @@ if uploaded_file is not None:
         st.error(f"❌ 讀取 Excel 發生錯誤：{e}")
 
 edited_df = st.data_editor(default_data, num_rows="dynamic", use_container_width=False)
-
 valid_df = edited_df.dropna(subset=['工作天數', '鑽探終點(m)']).copy()
 
 
@@ -168,21 +164,15 @@ def evaluate_water_layer(row):
     up_wl = row['上工水位(m)']
     total_depth = row['鑽探終點(m)']
 
-    if pd.isna(down_wl) and pd.isna(up_wl):
-        return "完全漏水層"
-    if pd.isna(up_wl) and pd.notna(down_wl):
-        return "漏水層"
+    if pd.isna(down_wl) and pd.isna(up_wl): return "完全漏水層"
+    if pd.isna(up_wl) and pd.notna(down_wl): return "漏水層"
 
     drop_m = up_wl - down_wl
-    if drop_m <= 0.3:
-        return "有水層"
+    if drop_m <= 0.3: return "有水層"
     else:
         ratio = drop_m / total_depth
-        if ratio < 0.5:
-            return "部分漏水層"
-        else:
-            return "漏水層"
-
+        if ratio < 0.5: return "部分漏水層"
+        else: return "漏水層"
 
 def fit_layer_text(label, seg_h_px, strip_px):
     n = len(label)
@@ -203,7 +193,7 @@ def fit_layer_text(label, seg_h_px, strip_px):
 
 
 # ==========================================
-# 3. CAD 成果圖（主圖，不含圖例）
+# 3. CAD 成果圖（主圖）
 # ==========================================
 st.write("---")
 st.subheader("📊 最終鑽探上下工水位成果圖")
@@ -228,15 +218,13 @@ if not valid_df.empty:
     # --------------------------------------------------
     # (A) 左側 Y 軸深度尺
     # --------------------------------------------------
-    fig.add_annotation(x=-1.4, y=-1.0, text="<b>深度(m)</b>", showarrow=False,
-                       font=dict(size=26, color="black"), xanchor="left")
+    fig.add_annotation(x=-1.4, y=-1.0, text="<b>深度(m)</b>", showarrow=False, font=dict(size=26, color="black"), xanchor="left")
     fig.add_shape(type="line", x0=RULER_X, y0=0, x1=RULER_X, y1=max_depth, line=dict(color="black", width=2))
 
     for d in range(max_depth + 1):
         if d % 5 == 0:
             fig.add_shape(type="line", x0=RULER_X, y0=d, x1=-0.7, y1=d, line=dict(color="black", width=2.5))
-            fig.add_annotation(x=-0.8, y=d, text=f"<b>{d}</b>", showarrow=False,
-                               font=dict(size=26, color="black"), xanchor="right")
+            fig.add_annotation(x=-0.8, y=d, text=f"<b>{d}</b>", showarrow=False, font=dict(size=26, color="black"), xanchor="right")
         else:
             fig.add_shape(type="line", x0=RULER_X, y0=d, x1=-0.5, y1=d, line=dict(color="black", width=1))
 
@@ -252,7 +240,37 @@ if not valid_df.empty:
     fig.add_annotation(x=lcx, y=-2.75, text="<b>鑽探進尺</b>", showarrow=False, font=dict(size=24))
 
     # --------------------------------------------------
-    # (C) 主體繪製：迴圈跑每一天的資料
+    # (C) 鑲嵌於主圖內的圖例 (回歸！)
+    # --------------------------------------------------
+    # 圖例動態錨定在最後一天的左上方，並受上方自訂參數控制
+    leg_x0 = X0 + max_days - 2.0 + LEG_X_OFFSET
+    leg_y0 = LEG_Y
+    
+    # 畫白底黑框確保不被鑽探線條干擾
+    fig.add_shape(type="rect", x0=leg_x0, y0=leg_y0, x1=leg_x0+1.9, y1=leg_y0+5.0, fillcolor="white", line=dict(color="black", width=2), layer="above")
+    fig.add_annotation(x=leg_x0+0.1, y=leg_y0+0.6, text="<b>(單位：m)</b>", showarrow=False, xanchor="left", font=dict(size=18))
+    fig.add_annotation(x=leg_x0+0.1, y=leg_y0+1.4, text="<b>圖例</b>", showarrow=False, xanchor="left", font=dict(size=22))
+
+    # 下工圖例 (▽)
+    fig.add_trace(go.Scatter(x=[leg_x0+0.3], y=[leg_y0+2.5], mode="markers", marker=dict(symbol="triangle-down-open", size=22, color="black", line=dict(width=2.5)), hoverinfo="skip"))
+    fig.add_shape(type="line", x0=leg_x0+0.3, y0=leg_y0+2.5, x1=leg_x0+0.3, y1=leg_y0+4.0, line=dict(dash="dash", color="black", width=1.5), layer="above")
+    fig.add_shape(type="line", x0=leg_x0+0.3, y0=leg_y0+2.5, x1=leg_x0+0.6, y1=leg_y0+2.5, line=dict(color="black", width=1.5), layer="above")
+    fig.add_annotation(x=leg_x0+0.7, y=leg_y0+2.5, text="<b>當日下工水位</b>", showarrow=False, xanchor="left", font=dict(size=20))
+
+    # 上工圖例 (▼)
+    fig.add_trace(go.Scatter(x=[leg_x0+0.3], y=[leg_y0+3.4], mode="markers", marker=dict(symbol="triangle-down", size=22, color="black"), hoverinfo="skip"))
+    fig.add_shape(type="line", x0=leg_x0+0.3, y0=leg_y0+3.4, x1=leg_x0+0.3, y1=leg_y0+4.0, line=dict(dash="dash", color="black", width=1.5), layer="above")
+    fig.add_shape(type="line", x0=leg_x0+0.3, y0=leg_y0+3.4, x1=leg_x0+0.6, y1=leg_y0+3.4, line=dict(color="black", width=1.5), layer="above")
+    fig.add_annotation(x=leg_x0+0.7, y=leg_y0+3.4, text="<b>翌日上工水位</b>", showarrow=False, xanchor="left", font=dict(size=20))
+
+    # 進尺底線圖例
+    fig.add_shape(type="line", x0=leg_x0+0.1, y0=leg_y0+4.2, x1=leg_x0+0.5, y1=leg_y0+4.2, line=dict(color="black", width=2), layer="above")
+    fig.add_shape(type="line", x0=leg_x0+0.5, y0=leg_y0+4.2, x1=leg_x0+0.6, y1=leg_y0+4.2, line=dict(dash="dash", color="black", width=1.5), layer="above")
+    fig.add_annotation(x=leg_x0+0.7, y=leg_y0+4.2, text="<b>當日鑽探進尺</b>", showarrow=False, xanchor="left", font=dict(size=20))
+
+
+    # --------------------------------------------------
+    # (D) 主體繪製：迴圈跑每一天的資料
     # --------------------------------------------------
     prev_depth = 0
 
@@ -263,8 +281,7 @@ if not valid_df.empty:
 
         start_d = row['鑽探起點(m)']
         end_d = row['鑽探終點(m)']
-        if pd.isna(start_d):
-            start_d = prev_depth
+        if pd.isna(start_d): start_d = prev_depth
 
         # --- 頂部表格內容 ---
         fig.add_shape(type="rect", x0=x_start, y0=-5.0, x1=x_end, y1=-3.5, line=dict(color="black", width=2))
@@ -279,35 +296,26 @@ if not valid_df.empty:
         layer_type = evaluate_water_layer(row)
         bg_color = LAYER_COLORS.get(layer_type, "white")
 
-        fig.add_shape(type="rect", x0=RULER_X, y0=start_d, x1=STRIP_X1, y1=end_d,
-                      fillcolor=bg_color, line=dict(color="black", width=1))
+        fig.add_shape(type="rect", x0=RULER_X, y0=start_d, x1=STRIP_X1, y1=end_d, fillcolor=bg_color, line=dict(color="black", width=1))
 
         seg_h_px = (end_d - start_d) * px_per_y
         layer_text, layer_font = fit_layer_text(layer_type, seg_h_px, strip_px)
-        fig.add_annotation(x=strip_cx, y=(start_d + end_d) / 2, text=f"<b>{layer_text}</b>",
-                           showarrow=False, font=dict(size=layer_font, color="black"))
+        fig.add_annotation(x=strip_cx, y=(start_d + end_d) / 2, text=f"<b>{layer_text}</b>", showarrow=False, font=dict(size=layer_font, color="black"))
 
         # --- 階梯鑽探輪廓 ---
         fig.add_shape(type="line", x0=x_start, y0=prev_depth, x1=x_start, y1=end_d, line=dict(color="black", width=2))
         fig.add_shape(type="line", x0=x_start, y0=end_d, x1=x_end, y1=end_d, line=dict(color="black", width=2))
 
-        fig.add_shape(type="line", x0=STRIP_X1, y0=end_d, x1=x_start, y1=end_d,
-                      line=dict(color="black", width=1.5, dash="dot"))
-        fig.add_shape(type="line", x0=x_start, y0=-2.0, x1=x_start, y1=prev_depth,
-                      line=dict(color="black", width=1.5, dash="dot"))
+        fig.add_shape(type="line", x0=STRIP_X1, y0=end_d, x1=x_start, y1=end_d, line=dict(color="black", width=1.5, dash="dot"))
+        fig.add_shape(type="line", x0=x_start, y0=-2.0, x1=x_start, y1=prev_depth, line=dict(color="black", width=1.5, dash="dot"))
         if idx_i == len(valid_df) - 1:
-            fig.add_shape(type="line", x0=x_end, y0=-2.0, x1=x_end, y1=end_d,
-                          line=dict(color="black", width=1.5, dash="dot"))
+            fig.add_shape(type="line", x0=x_end, y0=-2.0, x1=x_end, y1=end_d, line=dict(color="black", width=1.5, dash="dot"))
 
         # --- 轉折處標示深度 ---
         corner_text = f"{int(end_d)}m" if float(end_d).is_integer() else f"{end_d}m"
         fig.add_annotation(
-            x=x_start, y=end_d,
-            text=f"<b>{corner_text}</b>",
-            showarrow=False,
-            xanchor="right", yanchor="bottom",
-            xshift=-8, yshift=6,
-            font=dict(size=26, color="black")
+            x=x_start, y=end_d, text=f"<b>{corner_text}</b>", showarrow=False,
+            xanchor="right", yanchor="bottom", xshift=-8, yshift=6, font=dict(size=26, color="black")
         )
 
         # --- 上下工水位符號與「無水位」標示 ---
@@ -316,105 +324,71 @@ if not valid_df.empty:
 
         if pd.notna(wl_down):
             x_pos = x_start + 0.3
-            fig.add_shape(type="line", x0=x_pos, y0=wl_down, x1=x_pos, y1=end_d,
-                          line=dict(color="black", width=1.5, dash="dash"))
+            fig.add_shape(type="line", x0=x_pos, y0=wl_down, x1=x_pos, y1=end_d, line=dict(color="black", width=1.5, dash="dash"))
             fig.add_trace(go.Scatter(
-                x=[x_pos], y=[wl_down], mode="markers+text",
-                marker=dict(symbol="triangle-down-open", size=26, color="black", line=dict(width=2.5)),
-                text=[f"<b>{wl_down}</b>"], textposition="top center",
-                textfont=dict(size=26, color="black"), hoverinfo="skip"))
+                x=[x_pos], y=[wl_down], mode="markers+text", marker=dict(symbol="triangle-down-open", size=26, color="black", line=dict(width=2.5)),
+                text=[f"<b>{wl_down}</b>"], textposition="top center", textfont=dict(size=26, color="black"), hoverinfo="skip"))
         else:
-            fig.add_annotation(
-                x=x_start + 0.3, y=end_d,
-                text="<b>無<br>水<br>位</b>",
-                showarrow=False,
-                yanchor="bottom", yshift=4,
-                font=dict(size=24, color="black")
-            )
+            fig.add_annotation(x=x_start + 0.3, y=end_d, text="<b>無<br>水<br>位</b>", showarrow=False, yanchor="bottom", yshift=4, font=dict(size=24, color="black"))
 
         if pd.notna(wl_up):
             x_pos = x_start + 0.7
-            fig.add_shape(type="line", x0=x_pos, y0=wl_up, x1=x_pos, y1=end_d,
-                          line=dict(color="black", width=1.5, dash="dash"))
+            fig.add_shape(type="line", x0=x_pos, y0=wl_up, x1=x_pos, y1=end_d, line=dict(color="black", width=1.5, dash="dash"))
             fig.add_trace(go.Scatter(
-                x=[x_pos], y=[wl_up], mode="markers+text",
-                marker=dict(symbol="triangle-down", size=26, color="black"),
-                text=[f"<b>{wl_up}</b>"], textposition="top center",
-                textfont=dict(size=26, color="black"), hoverinfo="skip"))
+                x=[x_pos], y=[wl_up], mode="markers+text", marker=dict(symbol="triangle-down", size=26, color="black"),
+                text=[f"<b>{wl_up}</b>"], textposition="top center", textfont=dict(size=26, color="black"), hoverinfo="skip"))
         else:
-            fig.add_annotation(
-                x=x_start + 0.7, y=end_d,
-                text="<b>無<br>水<br>位</b>",
-                showarrow=False,
-                yanchor="bottom", yshift=4,
-                font=dict(size=24, color="black")
-            )
+            fig.add_annotation(x=x_start + 0.7, y=end_d, text="<b>無<br>水<br>位</b>", showarrow=False, yanchor="bottom", yshift=4, font=dict(size=24, color="black"))
 
         prev_depth = end_d
 
-    # --------------------------------------------------
-    # 4. 關閉 Plotly 預設坐標軸並設定範圍
-    # --------------------------------------------------
     fig.update_layout(
-        width=chart_w,
-        height=CHART_H,
-        showlegend=False,
-        plot_bgcolor='white',
+        width=chart_w, height=CHART_H, showlegend=False, plot_bgcolor='white',
         margin=dict(l=20, r=20, t=20, b=20),
         xaxis=dict(visible=False, range=[x_min, x_max]),
         yaxis=dict(visible=False, autorange="reversed", range=[y_bot, y_top])
     )
 
     export_name = st.text_input("匯出檔名（不含副檔名）", value="鑽探與水位成果圖")
-    export_scale = st.radio("輸出解析度（倍數越高越清晰，檔案也越大）", [1, 2, 3], index=1,
-                            horizontal=True, format_func=lambda x: f"{x}x")
+    export_scale = st.radio("輸出解析度（倍數越高越清晰，檔案也越大）", [1, 2, 3], index=1, horizontal=True, format_func=lambda x: f"{x}x")
     render_chart_with_download(fig, export_name or "鑽探與水位成果圖", "📥 下載成果圖 PNG", export_scale)
 
-    # ==========================================
-    # 5. 獨立圖例
-    # ==========================================
-    st.subheader("🔖 圖例（獨立圖）")
-    st.caption("圖例已與成果圖分開，按下方按鈕即可下載 PNG 或 SVG，再自行貼到成果圖空白處。")
+else:
+    st.info("請在上方表格輸入工作天數及鑽探終點深度，圖表將會自動生成。")
+
+
+# ==========================================
+# 4. 側邊欄 (Sidebar) - 獨立圖例與系統工具
+# ==========================================
+with st.sidebar:
+    st.header("🔖 獨立圖例下載區")
+    st.caption("若主圖空間太擠不想顯示圖例，您可以在此單獨下載圖例後，透過編輯軟體自行拼貼。")
 
     LW, LH = 230, 190
     leg = go.Figure()
 
-    leg.add_shape(type="rect", x0=2, y0=2, x1=LW - 2, y1=LH - 2,
-                  fillcolor="rgba(0,0,0,0)", line=dict(color="black", width=2))
-    leg.add_annotation(x=14, y=22, text="<b>圖例（單位：m）</b>", showarrow=False,
-                       xanchor="left", font=dict(size=18, color="black"))
+    leg.add_shape(type="rect", x0=2, y0=2, x1=LW - 2, y1=LH - 2, fillcolor="rgba(0,0,0,0)", line=dict(color="black", width=2))
+    leg.add_annotation(x=14, y=22, text="<b>圖例（單位：m）</b>", showarrow=False, xanchor="left", font=dict(size=18, color="black"))
     leg.add_shape(type="line", x0=8, y0=42, x1=LW - 8, y1=42, line=dict(color="black", width=1))
 
     rows = [76, 116, 156]
     sym_x, txt_x = 34, 68
 
-    leg.add_trace(go.Scatter(
-        x=[sym_x], y=[rows[0]], mode="markers",
-        marker=dict(symbol="triangle-down-open", size=22, color="black", line=dict(width=2.5)),
-        hoverinfo="skip"))
-    leg.add_annotation(x=txt_x, y=rows[0], text="<b>當日下工水位</b>", showarrow=False,
-                       xanchor="left", font=dict(size=18, color="black"))
+    leg.add_trace(go.Scatter(x=[sym_x], y=[rows[0]], mode="markers", marker=dict(symbol="triangle-down-open", size=22, color="black", line=dict(width=2.5)), hoverinfo="skip"))
+    leg.add_annotation(x=txt_x, y=rows[0], text="<b>當日下工水位</b>", showarrow=False, xanchor="left", font=dict(size=18, color="black"))
 
-    leg.add_trace(go.Scatter(
-        x=[sym_x], y=[rows[1]], mode="markers",
-        marker=dict(symbol="triangle-down", size=22, color="black"),
-        hoverinfo="skip"))
-    leg.add_annotation(x=txt_x, y=rows[1], text="<b>翌日上工水位</b>", showarrow=False,
-                       xanchor="left", font=dict(size=18, color="black"))
+    leg.add_trace(go.Scatter(x=[sym_x], y=[rows[1]], mode="markers", marker=dict(symbol="triangle-down", size=22, color="black"), hoverinfo="skip"))
+    leg.add_annotation(x=txt_x, y=rows[1], text="<b>翌日上工水位</b>", showarrow=False, xanchor="left", font=dict(size=18, color="black"))
 
     leg.add_shape(type="line", x0=14, y0=rows[2], x1=54, y1=rows[2], line=dict(color="black", width=3))
-    leg.add_annotation(x=txt_x, y=rows[2], text="<b>當日鑽探進尺</b>", showarrow=False,
-                       xanchor="left", font=dict(size=18, color="black"))
+    leg.add_annotation(x=txt_x, y=rows[2], text="<b>當日鑽探進尺</b>", showarrow=False, xanchor="left", font=dict(size=18, color="black"))
 
     leg.update_layout(
-        width=LW, height=LH,
-        showlegend=False,
-        plot_bgcolor='white', paper_bgcolor='white',
+        width=LW, height=LH, showlegend=False, plot_bgcolor='white', paper_bgcolor='white',
         margin=dict(l=0, r=0, t=0, b=0),
         xaxis=dict(visible=False, range=[0, LW], fixedrange=True),
         yaxis=dict(visible=False, range=[LH, 0], fixedrange=True)
     )
 
-    render_chart_with_download(leg, (export_name or "鑽探與水位成果圖") + "_圖例", "📥 下載圖例 PNG", export_scale)
-else:
-    st.info("請在上方表格輸入工作天數及鑽探終點深度，圖表將會自動生成。")
+    # 這裡的下載預設以 export_name 變數做命名前綴
+    render_chart_with_download(leg, "鑽探成果_獨立圖例", "📥 下載獨立圖例 PNG", 2)
