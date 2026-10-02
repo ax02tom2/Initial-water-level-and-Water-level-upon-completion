@@ -138,7 +138,7 @@ def fit_layer_text(label, seg_h_px, strip_px):
 # 3. CAD 成果圖（主圖，不含圖例）
 # ==========================================
 st.write("---")
-st.subheader("📊 最終鑽探與水位成果圖")
+st.subheader("📊 最終上下工水位成果圖")
 
 if not valid_df.empty:
     fig = go.Figure()
