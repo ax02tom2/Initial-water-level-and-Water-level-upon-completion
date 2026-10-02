@@ -85,6 +85,10 @@ LAYER_COLORS = {
     "漏水層": "#fff3e0",
 }
 
+# --- 鑲嵌圖例的位置參數 ---
+LEG_X_OFFSET = 0.0  # 圖例左右平移 (正值往右移，負值往左移)
+LEG_Y = 0.5         # 圖例上下平移 (代表深度 m，數值越大越往下)
+
 
 def render_chart_with_download(fig, filename, btn_label, scale=2):
     div_id = "plt_" + uuid.uuid4().hex[:8]
@@ -117,20 +121,21 @@ def render_chart_with_download(fig, filename, btn_label, scale=2):
 
 
 # ==========================================
-# 1. 資料輸入區
+# 1. 資料輸入區 (擴充：手動漏水層判定選單)
 # ==========================================
-st.write("您可以直接在下方表格輸入資料，或是上傳 Excel 檔案整批匯入，系統將自動進行漏水層判估並產出 CAD 風格圖表：")
-st.write("💡 **提示**：往下新增資料時，請確實填入「工作天數」與「鑽探終點(m)」，圖表才會更新。")
+st.write("您可以直接在下方表格輸入資料，或是上傳 Excel 檔案整批匯入。系統將自動進行漏水層判估，您也可以透過最右側欄位進行**人工強制微調**：")
 
 uploaded_file = st.file_uploader("📂 匯入 Excel 檔案 (選填)", type=["xlsx", "xls"])
 
+# 初始化預設表格
 default_data = pd.DataFrame({
     "工作天數": [np.nan] * 5,
     "日期": [""] * 5,
     "鑽探起點(m)": [np.nan] * 5,
     "鑽探終點(m)": [np.nan] * 5,
     "下工水位(m)": [np.nan] * 5,
-    "上工水位(m)": [np.nan] * 5
+    "上工水位(m)": [np.nan] * 5,
+    "手動漏水層判定(選填)": [None] * 5
 })
 
 if uploaded_file is not None:
@@ -142,17 +147,33 @@ if uploaded_file is not None:
         if missing_cols:
             st.error(f"❌ 上傳的 Excel 缺少以下必要表頭欄位：{', '.join(missing_cols)}。請修正後重新上傳。")
         else:
-            default_data = df_uploaded[required_cols] 
+            # 若上傳的檔案沒有手動判定欄位，則自動補上空欄位
+            if "手動漏水層判定(選填)" not in df_uploaded.columns:
+                df_uploaded["手動漏水層判定(選填)"] = None
+            default_data = df_uploaded[required_cols + ["手動漏水層判定(選填)"]] 
             st.success("✅ Excel 檔案讀取成功！您可以在下方表格繼續微調資料。")
     except Exception as e:
         st.error(f"❌ 讀取 Excel 發生錯誤：{e}")
 
-edited_df = st.data_editor(default_data, num_rows="dynamic", use_container_width=False)
+# 將最後一欄設定為 Streamlit 的專屬下拉選單
+edited_df = st.data_editor(
+    default_data, 
+    num_rows="dynamic", 
+    use_container_width=False,
+    column_config={
+        "手動漏水層判定(選填)": st.column_config.SelectboxColumn(
+            "手動漏水層判定(選填)",
+            help="若留空，系統將依文獻公式自動判定；若選擇，則強制採用您的選擇繪圖。",
+            options=["完全漏水層", "漏水層", "部分漏水層", "有水層"],
+            required=False
+        )
+    }
+)
 valid_df = edited_df.dropna(subset=['工作天數', '鑽探終點(m)']).copy()
 
 
 # ==========================================
-# 2. 漏水層判斷邏輯
+# 2. 漏水層判斷與結果呈現邏輯
 # ==========================================
 def evaluate_water_layer(row):
     down_wl = row['下工水位(m)']
@@ -168,6 +189,20 @@ def evaluate_water_layer(row):
         ratio = drop_m / total_depth
         if ratio < 0.5: return "部分漏水層"
         else: return "漏水層"
+
+# 計算自動與最終判定結果
+if not valid_df.empty:
+    valid_df['系統自動判定'] = valid_df.apply(evaluate_water_layer, axis=1)
+    # 若使用者有手動選擇，則覆蓋系統判定；否則採用系統判定
+    valid_df['最終繪圖採用判定'] = valid_df.apply(
+        lambda row: row['手動漏水層判定(選填)'] if pd.notna(row['手動漏水層判定(選填)']) and str(row['手動漏水層判定(選填)']).strip() != "" else row['系統自動判定'], 
+        axis=1
+    )
+
+    # 顯示給使用者確認的即時結果表
+    st.write("🔍 **水層評估結果即時預覽**：")
+    st.dataframe(valid_df[['工作天數', '下工水位(m)', '上工水位(m)', '系統自動判定', '最終繪圖採用判定']], use_container_width=False)
+
 
 def fit_layer_text(label, seg_h_px, strip_px):
     n = len(label)
@@ -257,8 +292,8 @@ if not valid_df.empty:
                      else f"<b>{start_d}~{end_d}m</b>")
         fig.add_annotation(x=(x_start + x_end) / 2, y=-2.75, text=depth_str, showarrow=False, font=dict(size=26))
 
-        # --- 左側漏水層色帶 ---
-        layer_type = evaluate_water_layer(row)
+        # --- 左側漏水層色帶 (採用最終繪圖採用判定) ---
+        layer_type = row['最終繪圖採用判定']
         bg_color = LAYER_COLORS.get(layer_type, "white")
 
         fig.add_shape(type="rect", x0=RULER_X, y0=start_d, x1=STRIP_X1, y1=end_d, fillcolor=bg_color, line=dict(color="black", width=1))
@@ -355,5 +390,4 @@ with st.sidebar:
         yaxis=dict(visible=False, range=[LH, 0], fixedrange=True)
     )
 
-    # 這裡的下載預設以 export_name 變數做命名前綴
     render_chart_with_download(leg, "鑽探成果_獨立圖例", "📥 下載獨立圖例 PNG", 2)
