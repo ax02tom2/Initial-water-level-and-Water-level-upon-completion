@@ -7,6 +7,34 @@ import uuid
 import streamlit.components.v1 as components
 
 st.set_page_config(page_title="鑽探上下工水位自動繪圖系統", layout="wide")
+
+# ==========================================
+# 新增：網頁專屬背景圖 (刷淡 65%、毛邊模糊處理)
+# ==========================================
+# 預設使用一張地質/工程相關的圖片，您可以替換 background-image 裡的 URL 為其他圖片網址
+page_bg_img = '''
+<style>
+.stApp::before {
+    content: "";
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    /* 鑽探/地質相關底圖網址 */
+    background-image: url("https://images.unsplash.com/photo-1504307651254-35680f356dfd?q=80&w=2070&auto=format&fit=crop"); 
+    background-size: cover;
+    background-position: center;
+    opacity: 0.35;         /* 刷淡約 65% (保留 35% 不透明度) */
+    filter: blur(15px);    /* 毛邊/模糊效果 */
+    transform: scale(1.05);/* 稍微放大避免模糊後邊緣產生白邊 */
+    z-index: -1;           /* 確保放置於最底層，不影響表格與按鈕點擊 */
+}
+</style>
+'''
+st.markdown(page_bg_img, unsafe_allow_html=True)
+
+
 st.title("💧 鑽探上下工水位自動繪圖系統")
 
 # ==========================================
@@ -26,6 +54,7 @@ LAYER_COLORS = {
     "部分漏水層": "#e8f5e9",
     "漏水層": "#fff3e0",
 }
+
 
 def render_chart_with_download(fig, filename, btn_label, scale=2):
     """
@@ -64,15 +93,13 @@ def render_chart_with_download(fig, filename, btn_label, scale=2):
 
 
 # ==========================================
-# 1. 資料輸入區 (新增 Excel 批次上傳)
+# 1. 資料輸入區
 # ==========================================
 st.write("您可以直接在下方表格輸入資料，或是上傳 Excel 檔案整批匯入，系統將自動進行漏水層判估並產出 CAD 風格圖表：")
 st.write("💡 **提示**：往下新增資料時，請確實填入「工作天數」與「鑽探終點(m)」，圖表才會更新。")
 
-# 新增：Excel 檔案上傳元件
 uploaded_file = st.file_uploader("📂 匯入 Excel 檔案 (選填)", type=["xlsx", "xls"])
 
-# 預設資料
 default_data = pd.DataFrame({
     "工作天數": [1.0, 2.0, 3.0, 4.0, 5.0],
     "日期": ["3/11", "3/12", "3/13", "3/14", "3/15"],
@@ -82,26 +109,22 @@ default_data = pd.DataFrame({
     "上工水位(m)": [np.nan, 9.2, 13.8, 23.2, np.nan]
 })
 
-# 若有上傳檔案，則覆蓋預設資料
 if uploaded_file is not None:
     try:
         df_uploaded = pd.read_excel(uploaded_file)
-        # 定義必備欄位
         required_cols = ["工作天數", "日期", "鑽探起點(m)", "鑽探終點(m)", "下工水位(m)", "上工水位(m)"]
         missing_cols = [col for col in required_cols if col not in df_uploaded.columns]
         
         if missing_cols:
             st.error(f"❌ 上傳的 Excel 缺少以下必要表頭欄位：{', '.join(missing_cols)}。請修正後重新上傳。")
         else:
-            default_data = df_uploaded[required_cols] # 替換預設資料
+            default_data = df_uploaded[required_cols] 
             st.success("✅ Excel 檔案讀取成功！您可以在下方表格繼續微調資料。")
     except Exception as e:
         st.error(f"❌ 讀取 Excel 發生錯誤：{e}")
 
-# 顯示可編輯表格
 edited_df = st.data_editor(default_data, num_rows="dynamic", use_container_width=False)
 
-# 防呆：自動過濾掉還沒輸入完成的空白列，避免報錯
 valid_df = edited_df.dropna(subset=['工作天數', '鑽探終點(m)']).copy()
 
 
@@ -130,13 +153,6 @@ def evaluate_water_layer(row):
 
 
 def fit_layer_text(label, seg_h_px, strip_px):
-    """
-    依色帶實際可用的寬、高，自動決定漏水層文字排法與字級：
-      1. 優先「直排單欄」(如：有／水／層)
-      2. 放不下且字數 >= 4 時，改「分兩排」(如：完全 / 漏水層)
-      3. 字級由大到小嘗試 (20 → 10)，確保不超出色帶
-    回傳 (文字, 字級)
-    """
     n = len(label)
     for f in range(20, 9, -1):
         line_h = f * 1.25
@@ -171,7 +187,6 @@ if not valid_df.empty:
     y_top = -6.0
     y_bot = max_depth + 2
 
-    # 圖寬依天數自動決定（固定寬度，漏水層文字換算才精準）
     chart_w = int(max(MIN_W, min(MAX_W, COL_PX * (x_max - x_min))))
     px_per_x = (chart_w - 40) / (x_max - x_min)
     px_per_y = (CHART_H - 40) / (y_bot - y_top)
@@ -228,7 +243,7 @@ if not valid_df.empty:
                      else f"<b>{start_d}~{end_d}m</b>")
         fig.add_annotation(x=(x_start + x_end) / 2, y=-2.75, text=depth_str, showarrow=False, font=dict(size=26))
 
-        # --- 左側漏水層色帶（文字自動排版，不超出色帶）---
+        # --- 左側漏水層色帶 ---
         layer_type = evaluate_water_layer(row)
         bg_color = LAYER_COLORS.get(layer_type, "white")
 
@@ -244,17 +259,15 @@ if not valid_df.empty:
         fig.add_shape(type="line", x0=x_start, y0=prev_depth, x1=x_start, y1=end_d, line=dict(color="black", width=2))
         fig.add_shape(type="line", x0=x_start, y0=end_d, x1=x_end, y1=end_d, line=dict(color="black", width=2))
 
-        # 從色帶拉到階梯轉折處的水平點線
         fig.add_shape(type="line", x0=STRIP_X1, y0=end_d, x1=x_start, y1=end_d,
                       line=dict(color="black", width=1.5, dash="dot"))
-        # 表頭往下的垂直點線
         fig.add_shape(type="line", x0=x_start, y0=-2.0, x1=x_start, y1=prev_depth,
                       line=dict(color="black", width=1.5, dash="dot"))
         if idx_i == len(valid_df) - 1:
             fig.add_shape(type="line", x0=x_end, y0=-2.0, x1=x_end, y1=end_d,
                           line=dict(color="black", width=1.5, dash="dot"))
 
-        # --- 轉折處標示深度：直角(x_start, end_d)左上方 ---
+        # --- 轉折處標示深度 ---
         corner_text = f"{int(end_d)}m" if float(end_d).is_integer() else f"{end_d}m"
         fig.add_annotation(
             x=x_start, y=end_d,
@@ -326,8 +339,7 @@ if not valid_df.empty:
     render_chart_with_download(fig, export_name or "鑽探與水位成果圖", "📥 下載成果圖 PNG", export_scale)
 
     # ==========================================
-    # 5. 獨立圖例（單獨一張圖，可下載 PNG 後自行貼到成果圖適當位置）
-    #    座標直接用像素，所以尺寸固定、字不會擠
+    # 5. 獨立圖例
     # ==========================================
     st.subheader("🔖 圖例（獨立圖）")
     st.caption("圖例已與成果圖分開，按下方按鈕即可下載 PNG 或 SVG，再自行貼到成果圖空白處。")
@@ -335,7 +347,6 @@ if not valid_df.empty:
     LW, LH = 230, 190
     leg = go.Figure()
 
-    # 外框（透明填色，才不會蓋住符號）
     leg.add_shape(type="rect", x0=2, y0=2, x1=LW - 2, y1=LH - 2,
                   fillcolor="rgba(0,0,0,0)", line=dict(color="black", width=2))
     leg.add_annotation(x=14, y=22, text="<b>圖例（單位：m）</b>", showarrow=False,
@@ -345,7 +356,6 @@ if not valid_df.empty:
     rows = [76, 116, 156]
     sym_x, txt_x = 34, 68
 
-    # 當日下工水位 (空心三角形)
     leg.add_trace(go.Scatter(
         x=[sym_x], y=[rows[0]], mode="markers",
         marker=dict(symbol="triangle-down-open", size=22, color="black", line=dict(width=2.5)),
@@ -353,7 +363,6 @@ if not valid_df.empty:
     leg.add_annotation(x=txt_x, y=rows[0], text="<b>當日下工水位</b>", showarrow=False,
                        xanchor="left", font=dict(size=18, color="black"))
 
-    # 翌日上工水位 (實心三角形)
     leg.add_trace(go.Scatter(
         x=[sym_x], y=[rows[1]], mode="markers",
         marker=dict(symbol="triangle-down", size=22, color="black"),
@@ -361,7 +370,6 @@ if not valid_df.empty:
     leg.add_annotation(x=txt_x, y=rows[1], text="<b>翌日上工水位</b>", showarrow=False,
                        xanchor="left", font=dict(size=18, color="black"))
 
-    # 當日鑽探進尺 (實線)
     leg.add_shape(type="line", x0=14, y0=rows[2], x1=54, y1=rows[2], line=dict(color="black", width=3))
     leg.add_annotation(x=txt_x, y=rows[2], text="<b>當日鑽探進尺</b>", showarrow=False,
                        xanchor="left", font=dict(size=18, color="black"))
